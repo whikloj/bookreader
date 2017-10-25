@@ -173,6 +173,10 @@ function BookReader() {
     this.server = '';
     this.searchInsideUrl = '/fulltext/new_inside.php';
 
+    // Allow images to be loaded with AJAX
+    this.loadWithAjax = false;
+    this.ajaxHeaders = {};
+
     return this;
 }
 
@@ -598,6 +602,61 @@ BookReader.prototype.setClickHandler2UP = function( element, data, handler) {
     });
 };
 
+// loadImage()
+//______________________________________________________________________________
+BookReader.prototype.loadImage = function(src, img) {
+    if (this.loadWithAjax) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', src);
+        xhr.responseType = "arraybuffer";
+        if (this.ajaxHeaders) {
+            for (var headerName in this.ajaxHeaders) {
+                if (this.ajaxHeaders.hasOwnProperty(headerName) && this.ajaxHeaders[headerName]) {
+                    xhr.setRequestHeader(headerName, this.ajaxHeaders[headerName]);
+                }
+            }
+        }
+        xhr.onreadystatechange = function(event) {
+            if (event.target.readyState === 4) {
+                if (event.target.status === 200 || event.target.status === 0) {
+                    var blb;
+                    // Make the raw data into a blob.
+                    // BlobBuilder fallback adapted from
+                    // http://stackoverflow.com/questions/15293694/blob-constructor-browser-compatibility
+                    try {
+                        blb = new window.Blob([this.response]);
+                    } catch (e) {
+                        var BlobBuilder = (
+                            window.BlobBuilder ||
+                            window.WebKitBlobBuilder ||
+                            window.MozBlobBuilder ||
+                            window.MSBlobBuilder
+                        );
+                        if (e.name === 'TypeError' && BlobBuilder) {
+                            var bb = new BlobBuilder();
+                            bb.append(this.response);
+                            blb = bb.getBlob();
+                        }
+                    }
+                    // If the blob is empty for some reason consider the image load a failure.
+                    if (blb.size === 0) {
+                        console.log("Empty image response.");
+                    }
+                    // Create a URL for the blob data and make it the source of the image object.
+                    // This will still trigger Image.onload to indicate a successful tile load.
+                    img.src = (window.URL || window.webkitURL).createObjectURL(blb);
+                } else {
+                    console.error('Unable to download the blob');
+                }
+            }
+        };
+        xhr.send();
+    }
+    else {
+        img.src = src;
+    }
+}
+
 // drawLeafsOnePage()
 //______________________________________________________________________________
 BookReader.prototype.drawLeafsOnePage = function() {
@@ -682,11 +741,11 @@ BookReader.prototype.drawLeafsOnePage = function() {
             BRpageViewEl.appendChild(div);
 
             var img = document.createElement('img');
-            img.src = this._getPageURI(index, this.reduce, 0);
             img.className = 'BRnoselect BRonePageImage';
             img.style.width = width + 'px';
             img.style.height = height + 'px';
             div.appendChild(img);
+            this.loadImage(this._getPageURI(index, this.reduce, 0), img);
         } else {
             //console.log("not displaying " + indicesToDisplay[i] + ' score=' + jQuery.inArray(indicesToDisplay[i], this.displayedIndices));
         }
@@ -1010,11 +1069,11 @@ BookReader.prototype.lazyLoadImage = function (dummyImage) {
         })
         .attr({
             'width': $(dummyImage).width(),
-            'height': $(dummyImage).height(),
-            'src': $(dummyImage).data('srcURL')
+            'height': $(dummyImage).height()
         });
 
     // replace with the new img
+    this.loadImage($(dummyImage).data('srcURL'), img);
     $(dummyImage).before(img).remove();
 
     img = null; // tidy up closure
@@ -2713,7 +2772,7 @@ BookReader.prototype.prefetchImg = function(index) {
             // Facing page at beginning or end, or beyond
             $(img).addClass('BRemptypage');
         }
-        img.src = pageURI;
+        this.loadImage(pageURI, img);
         img.uri = pageURI; // browser may rewrite src so we stash raw URI here
         this.prefetchedImgs[index] = img;
     }
